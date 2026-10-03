@@ -1,0 +1,19 @@
+body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f7; color: #222; }
+.app-header { display: flex; align-items: center; gap: 24px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #ddd; }
+.app-header .logo { font-weight: 700; }
+.app-header nav { display: flex; gap: 16px; }
+.app-header .sign-out { margin-left: auto; }
+.dashboard { max-width: 960px; margin: 32px auto; padding: 0 24px; }
+.welcome { font-size: 28px; margin: 0 0 4px; }
+.subtitle { color: #555; margin: 0 0 24px; }
+.dashboard-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+.avatar { border-radius: 50%; }
+.stats-grid { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.stat-value { display: block; font-size: 24px; font-weight: 700; }
+.stat-label { color: #555; }
+.app-footer { text-align: center; color: #777; padding: 24px; }
+.profile-card dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 12px 0 16px; }
+.profile-card dt { color: #555; }
+.profile-card dd { margin: 0; }
+.card h3 { margin-top: 0; }
