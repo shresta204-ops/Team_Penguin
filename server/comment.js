@@ -2,7 +2,7 @@
 
 const FOOTER = '\n---\n<sub>Drafted by TraceLens with Gemma 4, reviewed by a maintainer before posting.</sub>\n';
 
-export function diagnosisComment({ look, diagnosis, labels }) {
+export function diagnosisComment({ look, diagnosis, labels, similar = [] }) {
   const out = [];
   out.push('### Triage');
   out.push('');
@@ -30,6 +30,19 @@ export function diagnosisComment({ look, diagnosis, labels }) {
 
   out.push(`**Suggested fix:** ${diagnosis.fix || 'n/a'}`);
   out.push('');
+  if (diagnosis.patch) {
+    const p = diagnosis.patch;
+    out.push(`\`${p.file}:${p.line}\``);
+    out.push('```diff');
+    out.push(`- ${p.before}`);
+    out.push(`+ ${p.after}`);
+    out.push('```');
+    out.push('');
+  }
+  if (similar.length) {
+    out.push(`**Possibly related:** ${similar.map((i) => `#${i.number}`).join(', ')}`);
+    out.push('');
+  }
   out.push(`**Difficulty:** ${diagnosis.difficulty} · **Confidence:** ${diagnosis.confidence}`);
   if (labels.length) out.push(`**Suggested labels:** ${labels.map((l) => `\`${l}\``).join(', ')}`);
   if (labels.includes('good first issue')) {

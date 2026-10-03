@@ -1,7 +1,7 @@
 // The triage workflow: issue -> look -> search -> diagnose -> grounding -> draft comment.
 import { askGemma, httpError, MODEL } from './gemma.js';
 import { SYSTEM, lookPrompt, diagnosePrompt } from './prompts.js';
-import { parseIssueUrl, getIssue, findImageUrl, downloadImage } from './github.js';
+import { parseIssueUrl, getIssue, findImageUrl, downloadImage, searchIssues } from './github.js';
 import { searchRepo, numberLines } from './search.js';
 import { diagnosisComment, askReporterComment } from './comment.js';
 
@@ -42,7 +42,7 @@ export async function triage({ issueUrl, imageBase64, mimeType }, onStage = () =
   }
 
   onStage('searching');
-  const search = await searchRepo(ref, look);
+  const [search, similar] = await Promise.all([searchRepo(ref, look), findSimilar(ref, look)]);
 
   onStage('diagnosing');
   let diagnosis;
@@ -68,8 +68,9 @@ export async function triage({ issueUrl, imageBase64, mimeType }, onStage = () =
     mode: 'diagnosis',
     matches: search.matches,
     search: search.stats,
+    similar,
     diagnosis,
-    comment: diagnosisComment({ look, diagnosis, labels }),
+    comment: diagnosisComment({ look, diagnosis, labels, similar }),
     labels,
     elapsedMs: Date.now() - started,
   };
@@ -109,8 +110,41 @@ export function ground(diagnosis, files) {
     ...diagnosis,
     evidence,
     dropped,
+    patch: groundPatch(diagnosis.patch, files),
     confidence: evidence.length ? diagnosis.confidence : 'low',
   };
+}
+
+// A suggested patch survives only if its "before" line really exists in a fetched file.
+// "before" is then replaced by the real line; only "after" comes from the model.
+export function groundPatch(patch, files) {
+  if (!patch || typeof patch !== 'object' || !patch.before || !patch.after) return null;
+  const path = normalizePath(patch.file || '');
+  const text = files.get(path);
+  if (text == null) return null;
+  const lines = numberLines(text).map((l) => l.text);
+  const want = String(patch.before).trim();
+  const near = Math.round(Number(patch.line)) || 0;
+  const candidates = lines.map((t, i) => i + 1).filter((n) => lines[n - 1].trim() === want);
+  if (!candidates.length) return null;
+  const line = candidates.reduce((best, n) => (Math.abs(n - near) < Math.abs(best - near) ? n : best));
+  const before = lines[line - 1];
+  const indent = before.match(/^\s*/)[0];
+  const after = indent + String(patch.after).trim();
+  if (after === before) return null;
+  return { file: path, line, before, after };
+}
+
+// Other issues in the repo that mention the same on-screen text (possible duplicates).
+async function findSimilar(ref, look) {
+  const terms = look.on_screen_text.slice(0, 2);
+  if (!terms.length) return [];
+  try {
+    const found = await searchIssues(ref, terms);
+    return found.filter((i) => i.number !== ref.number).slice(0, 3);
+  } catch {
+    return []; // search is a nice-to-have; never fail triage over it
+  }
 }
 
 function chooseLabels(diagnosis) {
@@ -132,7 +166,17 @@ function normalizeLook(raw) {
     on_screen_text: list(raw.on_screen_text).slice(0, 8),
     keywords: list(raw.keywords).slice(0, 10),
     missing_details: list(raw.missing_details),
+    problem_box: validBox(raw.problem_box),
   };
+}
+
+// [ymin, xmin, ymax, xmax] normalized to 0-1000, or null.
+function validBox(box) {
+  if (!Array.isArray(box) || box.length !== 4) return null;
+  const [y1, x1, y2, x2] = box.map(Number);
+  if (![y1, x1, y2, x2].every((v) => Number.isFinite(v) && v >= 0 && v <= 1000)) return null;
+  if (y2 - y1 < 5 || x2 - x1 < 5) return null;
+  return [y1, x1, y2, x2];
 }
 
 function normalizeDiagnosis(raw) {
@@ -144,6 +188,7 @@ function normalizeDiagnosis(raw) {
     labels: Array.isArray(raw.labels) ? raw.labels.map(String).filter((l) => l.length <= 50) : [],
     difficulty: pick(raw.difficulty, ['easy', 'medium', 'hard'], 'medium'),
     confidence: pick(raw.confidence, ['low', 'medium', 'high'], 'low'),
+    patch: raw.patch && typeof raw.patch === 'object' ? raw.patch : null,
   };
 }
 

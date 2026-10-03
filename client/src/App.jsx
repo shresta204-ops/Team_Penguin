@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { Icon, GithubMark, Spark, Penguin } from './icons.jsx';
 
 export const APP_NAME = 'TraceLens';
@@ -304,7 +306,7 @@ function TriageResult({ result, stage, comment, setComment, labels }) {
             <EvidenceAndDiagnosis result={result} activeFile={activeFile} setActiveFile={setActiveFile} />
           )}
 
-          <div className="grid3 actions-row">
+          <div className="grid2 actions-row">
             <div className="action-card">
               <Icon name="alert" className="amber-icon" />
               <div>
@@ -320,6 +322,26 @@ function TriageResult({ result, stage, comment, setComment, labels }) {
               <div>
                 <strong>Grounding check</strong>
                 <p className="secondary small">{groundingText(result)}</p>
+              </div>
+            </div>
+            <div className="action-card">
+              <Icon name="layers" />
+              <div>
+                <strong>Similar issues</strong>
+                {result.similar?.length ? (
+                  <ul className="similar">
+                    {result.similar.map((i) => (
+                      <li key={i.number}>
+                        <a href={i.url} target="_blank" rel="noreferrer">#{i.number} {i.title}</a>
+                        <span className={`chip ${i.state === 'open' ? 'green' : 'grey'}`}>{i.state}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="secondary small">{result.mode === 'ask_reporter'
+                    ? 'Not checked: there is no on-screen text to search for yet.'
+                    : 'No other issue in this repo mentions the same on-screen text.'}</p>
+                )}
               </div>
             </div>
             <div className="action-card">
@@ -349,15 +371,33 @@ function IssueOverview({ result }) {
       {result.issue.body && <p className="issue-body">{result.issue.body}</p>}
       <div className="field-label">Screenshot</div>
       <button type="button" className="shot" onClick={() => setZoom(true)} title="Click to enlarge">
-        <img src={result.screenshot} alt="Screenshot from the issue" />
+        <Screenshot src={result.screenshot} box={result.look.problem_box} alt="Screenshot from the issue" />
       </button>
+      {result.look.problem_box && <p className="secondary small box-note"><span className="box-key" /> Where Gemma sees the problem</p>}
       {zoom && (
         <div className="lightbox" onClick={() => setZoom(false)} role="dialog" aria-label="Screenshot">
-          <img src={result.screenshot} alt="Screenshot from the issue, enlarged" />
+          <div className="lightbox-inner">
+            <Screenshot src={result.screenshot} box={result.look.problem_box} alt="Screenshot from the issue, enlarged" />
+          </div>
           <button type="button" className="lightbox-close" aria-label="Close"><Icon name="x" /></button>
         </div>
       )}
     </div>
+  );
+}
+
+// Screenshot with Gemma's problem box ([ymin, xmin, ymax, xmax], 0-1000) drawn on top.
+function Screenshot({ src, box, alt }) {
+  return (
+    <span className="shot-frame">
+      <img src={src} alt={alt} />
+      {box && (
+        <span className="problem-box" style={{
+          top: `${box[0] / 10}%`, left: `${box[1] / 10}%`,
+          height: `${(box[2] - box[0]) / 10}%`, width: `${(box[3] - box[1]) / 10}%`,
+        }} />
+      )}
+    </span>
   );
 }
 
@@ -473,6 +513,14 @@ function EvidenceAndDiagnosis({ result, activeFile, setActiveFile }) {
           <div className="dx-item">
             <div className="field-label">Suggested fix</div>
             <p className="fix">{diagnosis.fix}</p>
+            {diagnosis.patch && (
+              <div className="diff" aria-label="Suggested change">
+                <div className="diff-head mono">{diagnosis.patch.file}:{diagnosis.patch.line}</div>
+                <div className="diff-line del"><span>-</span>{diagnosis.patch.before.trim()}</div>
+                <div className="diff-line add"><span>+</span>{diagnosis.patch.after.trim()}</div>
+                <div className="diff-note secondary small">The removed line is checked against the real file.</div>
+              </div>
+            )}
           </div>
           <div className="dx-pair">
             <div><div className="field-label">Difficulty</div><span className={`chip ${levelColor(diagnosis.difficulty, true)}`}>{cap(diagnosis.difficulty)}</span></div>
@@ -568,6 +616,8 @@ function AiCard({ model }) {
 function CommentCard({ comment, setComment, mode }) {
   const ref = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const html = useMemo(() => (preview ? DOMPurify.sanitize(marked.parse(comment, { gfm: true, breaks: true })) : ''), [preview, comment]);
   async function copy() {
     try {
       await navigator.clipboard.writeText(comment);
@@ -579,7 +629,10 @@ function CommentCard({ comment, setComment, mode }) {
     <section className="card">
       <div className="rail-head">
         <h2>Triage comment (draft)</h2>
-        <button type="button" className="outline small-btn" onClick={() => ref.current?.focus()}>Edit</button>
+        <div className="seg">
+          <button type="button" className={preview ? 'seg-btn' : 'seg-btn on'} onClick={() => { setPreview(false); setTimeout(() => ref.current?.focus()); }}>Edit</button>
+          <button type="button" className={preview ? 'seg-btn on' : 'seg-btn'} onClick={() => setPreview(true)}>Preview</button>
+        </div>
       </div>
       {mode === 'ask_reporter' && <p className="secondary small">Asks the reporter for details. No diagnosis.</p>}
       <div className="draft">
@@ -587,7 +640,9 @@ function CommentCard({ comment, setComment, mode }) {
           {copied ? <Icon name="check" size={16} /> : <Icon name="copy" size={16} />}
         </button>
         <label htmlFor="comment" className="sr-only">Draft comment</label>
-        <textarea id="comment" ref={ref} value={comment} onChange={(e) => setComment(e.target.value)} rows={20} />
+        {preview
+          ? <div className="md-preview" dangerouslySetInnerHTML={{ __html: html }} />
+          : <textarea id="comment" ref={ref} value={comment} onChange={(e) => setComment(e.target.value)} rows={20} />}
       </div>
       <p className="secondary small">Edit freely. Nothing is posted until you click Post to GitHub.</p>
     </section>

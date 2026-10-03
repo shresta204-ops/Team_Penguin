@@ -27,6 +27,13 @@ Issue link -> Fetch issue + screenshot (GitHub API or manual upload)
 5. **Gemma call 2 ("diagnose")** gets the screenshot and the numbered code and returns the root cause, evidence (file and line), fix, labels, difficulty and confidence.
 6. You edit the draft comment, then click **Post to GitHub**. Nothing is posted before that.
 
+### Extra features
+
+- **Problem area on the screenshot:** Gemma returns a box around the broken part of the screen, and the UI draws it in red.
+- **Suggested change as a diff:** Gemma proposes a one-line patch. The patch is kept only if its "before" line exists word-for-word in a fetched file, and the red line shown is always the real file text.
+- **Similar issues:** TraceLens searches the repo's issues for the same on-screen text to flag possible duplicates. The search runs alongside the code search.
+- **Comment preview:** switch the draft between editing it and seeing it as GitHub will show it (sanitized).
+
 ### Trust and grounding
 
 - Gemma may only cite files TraceLens fetched. Any other path is dropped, and the UI says how many were dropped.

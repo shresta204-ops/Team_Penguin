@@ -96,6 +96,14 @@ export function getFile({ owner, repo }, branch, path) {
   return gh(`/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`, { raw: true });
 }
 
+// Issues in the same repo whose title or body mention any of the terms.
+export async function searchIssues({ owner, repo }, terms) {
+  const quoted = terms.map((t) => `"${String(t).replace(/"/g, '')}"`).join(' OR ');
+  const q = `repo:${owner}/${repo} is:issue ${quoted}`;
+  const res = await gh(`/search/issues?per_page=5&q=${encodeURIComponent(q)}`);
+  return res.items.map((i) => ({ number: i.number, title: i.title, url: i.html_url, state: i.state }));
+}
+
 export async function postComment({ owner, repo, number }, body) {
   const res = await gh(`/repos/${owner}/${repo}/issues/${number}/comments`, { method: 'POST', body: { body } });
   return res.html_url;
