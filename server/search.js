@@ -9,9 +9,10 @@ const SKIP_FILE = /(\.min\.(js|css)$|\.d\.ts$|(^|\/)(package-lock\.json|yarn\.lo
 const RESOLVE_EXT = ['', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.vue', '.svelte', '.css',
   '/index.js', '/index.jsx', '/index.ts', '/index.tsx'];
 
-export async function searchRepo(repoRef, look) {
+export async function searchRepo(repoRef, look, pathPrefix = '') {
   const { branch, paths } = await getRepoTree(repoRef);
-  const allSource = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p) && !SKIP_FILE.test(p));
+  const prefix = cleanPrefix(pathPrefix);
+  const allSource = paths.filter((p) => SOURCE_EXT.test(p) && !SKIP.test(p) && !SKIP_FILE.test(p) && p.startsWith(prefix));
   const treeSet = new Set(allSource);
 
   // Prefer likely UI files when the repo has more than the cap.
@@ -65,6 +66,12 @@ export async function searchRepo(repoRef, look) {
     files, // path -> text, used by the grounding check
     stats: { sourceFiles: allSource.length, fetched: files.size, searchTerms: uniqueScreen },
   };
+}
+
+// "./demo-repo" or "/demo-repo/" -> "demo-repo/"
+function cleanPrefix(prefix) {
+  const p = String(prefix || '').trim().replace(/^\.?\/+/, '').replace(/\/+$/, '');
+  return p ? `${p}/` : '';
 }
 
 function priority(path) {

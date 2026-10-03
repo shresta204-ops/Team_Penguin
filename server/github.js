@@ -1,4 +1,5 @@
 // GitHub REST helpers. Only the server talks to GitHub.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { httpError } from './gemma.js';
 
 const API = 'https://api.github.com';
@@ -11,11 +12,19 @@ export function parseIssueUrl(url) {
   return { owner: m[1], repo: m[2], number: Number(m[3]) };
 }
 
+// The signed-in user's OAuth token for this request, if any (see auth.js).
+const requestToken = new AsyncLocalStorage();
+
+export function withToken(userToken, fn) {
+  return requestToken.run(userToken || null, fn);
+}
+
 function token() {
-  if (!process.env.GITHUB_TOKEN) {
-    throw httpError(500, 'Missing GitHub token. Add GITHUB_TOKEN to server/.env and restart the server.');
+  const t = requestToken.getStore() || process.env.GITHUB_TOKEN;
+  if (!t) {
+    throw httpError(500, 'Missing GitHub token. Sign in with GitHub, or add GITHUB_TOKEN to server/.env and restart the server.');
   }
-  return process.env.GITHUB_TOKEN;
+  return t;
 }
 
 async function gh(path, { method = 'GET', body, raw = false } = {}) {
@@ -54,6 +63,27 @@ export async function getIssue({ owner, repo, number }) {
     number: issue.number,
     labels: issue.labels.map((l) => (typeof l === 'string' ? l : l.name)),
   };
+}
+
+// Open issues (not PRs) in a repo, flagged with whether they contain a screenshot.
+export async function listIssues({ owner, repo }) {
+  const items = await gh(`/repos/${owner}/${repo}/issues?state=open&per_page=50`);
+  return items.filter((i) => !i.pull_request).map((i) => ({
+    number: i.number,
+    title: i.title,
+    url: i.html_url,
+    user: i.user?.login,
+    createdAt: i.created_at,
+    comments: i.comments,
+    labels: i.labels.map((l) => (typeof l === 'string' ? l : l.name)),
+    hasScreenshot: Boolean(findImageUrl(i.body || '')),
+  }));
+}
+
+export function parseRepo(input) {
+  const m = String(input || '').trim().match(/^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/i);
+  if (!m) throw httpError(400, 'Enter a repository as owner/repo or a github.com link.');
+  return { owner: m[1], repo: m[2] };
 }
 
 // First image in the issue body, from markdown ![](...) or <img src="...">.

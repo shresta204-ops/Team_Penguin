@@ -70,6 +70,22 @@ Or build the client once (`npm run build` in `client/`) and the server serves it
 
 Note on the model id: the brief listed `gemma-4-26ba4b-it`, which we read as a typo for `gemma-4-26b-a4b-it`. If you get "Model ... is not available on this key", set `GEMMA_MODEL` to the id your key lists.
 
+## Sign in with GitHub (optional)
+
+Instead of one shared `GITHUB_TOKEN`, each maintainer can sign in, and TraceLens then reads issues and posts comments as that user.
+
+1. Go to https://github.com/settings/developers, then **OAuth Apps**, then **New OAuth App**.
+2. Set **Homepage URL** to `http://localhost:8787` and **Authorization callback URL** to `http://localhost:8787/api/auth/callback`.
+3. Create a client secret, then add the following to `server/.env`:
+   ```
+   GITHUB_CLIENT_ID=...
+   GITHUB_CLIENT_SECRET=...
+   APP_URL=http://localhost:8787
+   ```
+4. Restart the server and open http://localhost:8787. A **Sign in with GitHub** button appears in the top bar.
+
+The token requests the `public_repo` scope. Sessions are kept in server memory, so restarting the server signs everyone out. When nobody is signed in, `GITHUB_TOKEN` is used.
+
 ## API
 
 | Route | Body | Returns |

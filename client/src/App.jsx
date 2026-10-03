@@ -13,22 +13,30 @@ const STAGE_STEP = { fetching: 0, looking: 1, searching: 2, diagnosing: 3 };
 export default function App() {
   const [view, setView] = useState('home');
   const [model, setModel] = useState('');
+  const [auth, setAuth] = useState(null); // { signedIn, login, avatarUrl, oauthConfigured }
   const [issueUrl, setIssueUrl] = useState('');
   const [upload, setUpload] = useState(null); // { name, mimeType, data }
   const [stage, setStage] = useState(null);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => loadLocal('tl_history', []));
+  const [health, setHealth] = useState(null);
+  const [pathPrefix, setPathPrefix] = useState(() => loadLocal('tl_path', ''));
   const [comment, setComment] = useState('');
   const [labels, setLabels] = useState([]);
 
   useEffect(() => {
-    fetch('/api/health').then((r) => r.json()).then((h) => setModel(h.model)).catch(() => setModel('server offline'));
+    fetch('/api/health').then((r) => r.json()).then((h) => { setModel(h.model); setHealth(h); }).catch(() => setModel('server offline'));
+    fetch('/api/auth/me').then((r) => r.json()).then(setAuth).catch(() => {});
     const saved = new URLSearchParams(location.search).get('saved');
     if (saved) runTriage({ saved });
   }, []);
 
   const busy = stage !== null;
+
+  // History and the folder filter survive a page reload (per browser only).
+  useEffect(() => saveLocal('tl_history', history.slice(0, 5)), [history]);
+  useEffect(() => saveLocal('tl_path', pathPrefix), [pathPrefix]);
 
   function show(r) {
     setResult(r);
@@ -69,7 +77,17 @@ export default function App() {
   function onSubmit(e) {
     e.preventDefault();
     if (!issueUrl.trim()) return setError({ message: 'Paste a GitHub issue link first, like https://github.com/owner/repo/issues/12.' });
-    runTriage(upload ? { issueUrl, imageBase64: upload.data, mimeType: upload.mimeType } : { issueUrl });
+    const scope = pathPrefix.trim() ? { pathPrefix: pathPrefix.trim() } : {};
+    runTriage(upload ? { issueUrl, imageBase64: upload.data, mimeType: upload.mimeType, ...scope } : { issueUrl, ...scope });
+  }
+
+  // From the inbox: open the issue on Home and triage it straight away.
+  function triageFromInbox(url) {
+    setIssueUrl(url);
+    setUpload(null);
+    setView('home');
+    const scope = pathPrefix.trim() ? { pathPrefix: pathPrefix.trim() } : {};
+    runTriage({ issueUrl: url, ...scope });
   }
 
   const repoName = useMemo(() => issueUrl.match(/github\.com\/([\w.-]+\/[\w.-]+)/)?.[1] || 'No repository', [issueUrl]);
@@ -82,7 +100,7 @@ export default function App() {
         <header className="topbar">
           <span className="topbar-item"><GithubMark /> {repoName}</span>
           <span className="topbar-item secondary">Model <code>{model || '...'}</code></span>
-          <span className="topbar-item"><span className="avatar">TP</span> {TEAM}</span>
+          <Account auth={auth} setAuth={setAuth} />
         </header>
 
         <div className="columns">
@@ -97,6 +115,7 @@ export default function App() {
                 <TriageForm
                   issueUrl={issueUrl} setIssueUrl={setIssueUrl} busy={busy} onSubmit={onSubmit}
                   upload={upload} setUpload={setUpload} setError={setError} highlightUpload={error?.needsUpload}
+                  pathPrefix={pathPrefix} setPathPrefix={setPathPrefix}
                 />
 
                 {error && (
@@ -117,7 +136,9 @@ export default function App() {
               </>
             )}
 
-            {view === 'recent' && <RecentIssues history={history} onOpen={show} />}
+            {view === 'inbox' && <Inbox defaultRepo={repoName === 'No repository' ? '' : repoName} onTriage={triageFromInbox} busy={busy} />}
+            {view === 'recent' && <RecentIssues history={history} onOpen={show} onClear={() => setHistory([])} />}
+            {view === 'settings' && <Settings health={health} auth={auth} />}
             {view === 'help' && <Help />}
           </main>
 
@@ -137,10 +158,35 @@ export default function App() {
   );
 }
 
+// Signed-in GitHub user, or a sign-in button when OAuth is set up on the server.
+function Account({ auth, setAuth }) {
+  if (auth?.signedIn) {
+    async function signOut() {
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+      setAuth({ ...auth, signedIn: false, login: null, avatarUrl: null });
+    }
+    return (
+      <span className="topbar-item">
+        {auth.avatarUrl ? <img className="avatar avatar-img" src={auth.avatarUrl} alt="" /> : <span className="avatar">{auth.login.slice(0, 2).toUpperCase()}</span>}
+        {auth.login}
+        <button type="button" className="link" onClick={signOut}>Sign out</button>
+      </span>
+    );
+  }
+  if (auth?.oauthConfigured) {
+    return (
+      <a className="signin" href="/api/auth/login"><GithubMark /> Sign in with GitHub</a>
+    );
+  }
+  return <span className="topbar-item"><span className="avatar">TP</span> {TEAM}</span>;
+}
+
 function Sidebar({ view, setView, historyCount }) {
   const items = [
     { id: 'home', icon: 'home', label: 'Home' },
+    { id: 'inbox', icon: 'inbox', label: 'Issue inbox' },
     { id: 'recent', icon: 'clock', label: `Recent issues${historyCount ? ` (${historyCount})` : ''}` },
+    { id: 'settings', icon: 'settings', label: 'Settings' },
     { id: 'help', icon: 'book', label: 'Help & docs' },
   ];
   return (
@@ -175,7 +221,7 @@ function Sidebar({ view, setView, historyCount }) {
   );
 }
 
-function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, setError, highlightUpload }) {
+function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, setError, highlightUpload, pathPrefix, setPathPrefix }) {
   async function onFile(e) {
     const file = e.target.files?.[0];
     if (!file) return setUpload(null);
@@ -211,6 +257,11 @@ function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, 
           <input type="file" accept="image/*" onChange={onFile} disabled={busy} />
         </label>
         {upload && <button type="button" className="link" onClick={() => setUpload(null)}>Remove</button>}
+      </div>
+      <div className="upload-row">
+        <label className="field-label" htmlFor="path-prefix">Limit code search to a folder (optional)</label>
+        <input id="path-prefix" className="text-input" placeholder="e.g. demo-repo/ or packages/web/" value={pathPrefix}
+          onChange={(e) => setPathPrefix(e.target.value)} disabled={busy} />
       </div>
     </section>
   );
@@ -262,7 +313,12 @@ function TriageResult({ result, stage, comment, setComment, labels }) {
         <h2>Triage result</h2>
         <span className={status.cls}>{result && <Icon name="check" size={14} />}{status.text}</span>
         {result && (
-          <button type="button" className="primary push" onClick={postToGithub} disabled={posting}>
+          <button type="button" className="outline push" onClick={() => downloadResult(result, comment, labels)}>
+            <Icon name="download" size={15} /> Download
+          </button>
+        )}
+        {result && (
+          <button type="button" className="primary" onClick={postToGithub} disabled={posting}>
             <GithubMark /> {posting ? 'Posting...' : 'Post to GitHub'}
           </button>
         )}
@@ -700,12 +756,116 @@ function ContributorCard({ diagnosis, labels }) {
   );
 }
 
-function RecentIssues({ history, onOpen }) {
+function Inbox({ defaultRepo, onTriage, busy }) {
+  const [repo, setRepo] = useState(() => loadLocal('tl_inbox_repo', defaultRepo));
+  const [data, setData] = useState(null); // { repo, issues }
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  async function load(e) {
+    e?.preventDefault();
+    if (!repo.trim()) return setError('Enter a repository as owner/repo.');
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/issues?repo=${encodeURIComponent(repo.trim())}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error);
+      setData(body);
+      saveLocal('tl_inbox_repo', repo.trim());
+    } catch (err) {
+      setError(err.message || 'Could not load issues. Check the server log.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { if (repo) load(); }, []);
+
+  const withShots = data?.issues.filter((i) => i.hasScreenshot) || [];
+  const others = data?.issues.filter((i) => !i.hasScreenshot) || [];
+
   return (
     <section className="card">
-      <h2>Recent issues</h2>
+      <h2>Issue inbox</h2>
+      <p className="secondary">Open issues in a repository. Issues with a screenshot are listed first, ready to triage.</p>
+      <form className="url-row" onSubmit={load}>
+        <label className="url-field">
+          <GithubMark />
+          <span className="sr-only">Repository</span>
+          <input placeholder="owner/repo" value={repo} onChange={(e) => setRepo(e.target.value)} />
+        </label>
+        <button type="submit" className="primary" disabled={loading}>{loading ? 'Loading...' : 'Load issues'}</button>
+      </form>
+      {error && <div className="error inbox-error" role="alert"><Icon name="alert" /> {error}</div>}
+      {data && (
+        <>
+          <p className="secondary small inbox-count">{data.repo}: {data.issues.length} open issue{data.issues.length === 1 ? '' : 's'}, {withShots.length} with a screenshot.</p>
+          <ul className="recent">
+            {[...withShots, ...others].map((i) => (
+              <li key={i.number} className="inbox-item">
+                <div className="inbox-main">
+                  <a href={i.url} target="_blank" rel="noreferrer"><strong>#{i.number}</strong> {i.title}</a>
+                  <div className="chips">
+                    {i.hasScreenshot ? <span className="chip blue">Screenshot</span> : <span className="chip grey">No screenshot</span>}
+                    {i.labels.map((l) => <span key={l} className={`chip ${labelColor(l)}`}>{l}</span>)}
+                    <span className="secondary small">by {i.user} · {i.comments} comment{i.comments === 1 ? '' : 's'}</span>
+                  </div>
+                </div>
+                <button type="button" className={i.hasScreenshot ? 'primary' : 'outline'} disabled={busy} onClick={() => onTriage(i.url)}>
+                  Triage <Icon name="arrow" size={15} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+function Settings({ health, auth }) {
+  const rows = [
+    { ok: health?.setup?.gemini, name: 'Gemini API key', key: 'GEMINI_API_KEY', fix: 'Create a key at aistudio.google.com/apikey.' },
+    { ok: health?.setup?.githubToken || auth?.signedIn, name: 'GitHub access', key: 'GITHUB_TOKEN', fix: 'Add a fine-grained token (Issues read/write, Contents read), or sign in with GitHub.' },
+    { ok: health?.setup?.oauth, name: 'Sign in with GitHub (optional)', key: 'GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET', fix: 'Create an OAuth App with callback http://localhost:8787/api/auth/callback.', optional: true },
+  ];
+  return (
+    <section className="card">
+      <h2>Settings</h2>
+      <p className="secondary">Keys live only in <code>server/.env</code>. This page shows whether each one is set, never its value.</p>
+      <ul className="setup">
+        {rows.map((r) => (
+          <li key={r.name}>
+            <span className={`chip ${r.ok ? 'green' : r.optional ? 'grey' : 'red'}`}>{r.ok ? 'Ready' : r.optional ? 'Not set' : 'Missing'}</span>
+            <div>
+              <strong>{r.name}</strong> <code>{r.key}</code>
+              {!r.ok && <div className="secondary small">{r.fix} Then restart the server.</div>}
+            </div>
+          </li>
+        ))}
+        <li>
+          <span className="chip blue">Model</span>
+          <div><strong>Gemma model</strong> <code>{health?.model || '...'}</code><div className="secondary small">Change <code>GEMMA_MODEL</code> in server/.env, for example to gemma-4-31b-it.</div></div>
+        </li>
+        <li>
+          <span className="chip blue">Signed in</span>
+          <div><strong>GitHub account</strong> {auth?.signedIn ? <code>{auth.login}</code> : <span className="secondary">Not signed in; the server token is used.</span>}</div>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function RecentIssues({ history, onOpen, onClear }) {
+  return (
+    <section className="card">
+      <div className="rail-head">
+        <h2>Recent issues</h2>
+        {history.length > 0 && <button type="button" className="outline small-btn" onClick={onClear}>Clear</button>}
+      </div>
       {history.length === 0 ? (
-        <p className="secondary">No issues triaged in this session yet.</p>
+        <p className="secondary">No issues triaged yet.</p>
       ) : (
         <ul className="recent">
           {history.map((h) => (
@@ -801,6 +961,45 @@ async function readLines(body, onMessage) {
     if (done) break;
   }
   if (buffer.trim()) onMessage(JSON.parse(buffer));
+}
+
+// Saves the triage (draft comment plus details) as a Markdown file.
+function downloadResult(result, comment, labels) {
+  const d = result.diagnosis;
+  const lines = [
+    `# Triage: #${result.issue.number} ${result.issue.title}`,
+    '',
+    `- Issue: ${result.issue.url}`,
+    `- Mode: ${result.mode}`,
+    `- Model: ${result.model} (${seconds(result.elapsedMs)})`,
+    d ? `- Confidence: ${d.confidence} · Difficulty: ${d.difficulty}` : '- Asked the reporter for more details',
+    `- Labels: ${labels.join(', ') || 'none'}`,
+    `- On-screen text: ${result.look.on_screen_text.join(', ') || 'none'}`,
+    '',
+    '## Draft comment',
+    '',
+    comment,
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `triage-issue-${result.issue.number}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// localStorage can be unavailable (private mode, quota); the app works without it.
+function loadLocal(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : JSON.parse(v);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveLocal(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
 }
 
 const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;

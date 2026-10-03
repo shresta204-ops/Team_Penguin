@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MODEL, httpError } from './gemma.js';
 import { triage } from './pipeline.js';
-import { parseIssueUrl, postComment, addLabels } from './github.js';
+import { parseIssueUrl, postComment, addLabels, listIssues, parseRepo } from './github.js';
+import { authRouter, sessionToken } from './auth.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SAVED_DIR = path.join(here, '..', 'saved');
@@ -15,9 +16,32 @@ const CLIENT_DIST = path.join(here, '..', 'client', 'dist');
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
+app.use('/api', sessionToken); // GitHub calls use the signed-in user's token when there is one
+app.use('/api/auth', authRouter);
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, model: MODEL });
+  res.json({
+    ok: true,
+    model: MODEL,
+    // Which keys are set (never their values), for the Settings page.
+    setup: {
+      gemini: Boolean(process.env.GEMINI_API_KEY),
+      githubToken: Boolean(process.env.GITHUB_TOKEN),
+      oauth: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
+    },
+  });
+});
+
+// Issue inbox: open issues in a repo, screenshot issues first. Query: ?repo=owner/repo
+app.get('/api/issues', async (req, res) => {
+  try {
+    const ref = parseRepo(req.query.repo);
+    const issues = await listIssues(ref);
+    issues.sort((a, b) => Number(b.hasScreenshot) - Number(a.hasScreenshot) || b.number - a.number);
+    res.json({ repo: `${ref.owner}/${ref.repo}`, issues });
+  } catch (err) {
+    res.status(err.expose ? err.status : 500).json(errorBody(err));
+  }
 });
 
 // Body: { issueUrl } | { issueUrl, imageBase64, mimeType } | { issueUrl, saved: true } | { saved: "name" }

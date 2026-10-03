@@ -8,7 +8,7 @@ import { diagnosisComment, askReporterComment } from './comment.js';
 const MAX_PROMPT_CHARS = 90_000;
 
 // onStage(name) lets the route stream progress to the UI.
-export async function triage({ issueUrl, imageBase64, mimeType }, onStage = () => {}) {
+export async function triage({ issueUrl, imageBase64, mimeType, pathPrefix }, onStage = () => {}) {
   const started = Date.now();
   const ref = parseIssueUrl(issueUrl);
 
@@ -42,7 +42,7 @@ export async function triage({ issueUrl, imageBase64, mimeType }, onStage = () =
   }
 
   onStage('searching');
-  const [search, similar] = await Promise.all([searchRepo(ref, look), findSimilar(ref, look)]);
+  const [search, similar] = await Promise.all([searchRepo(ref, look, pathPrefix), findSimilar(ref, look)]);
 
   onStage('diagnosing');
   let diagnosis;
