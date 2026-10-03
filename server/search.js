@@ -69,7 +69,7 @@ export async function searchRepo(repoRef, look, pathPrefix = '') {
 }
 
 // "./demo-repo" or "/demo-repo/" -> "demo-repo/"
-function cleanPrefix(prefix) {
+export function cleanPrefix(prefix) {
   const p = String(prefix || '').trim().replace(/^\.?\/+/, '').replace(/\/+$/, '');
   return p ? `${p}/` : '';
 }

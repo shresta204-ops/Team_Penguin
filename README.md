@@ -35,6 +35,7 @@ Issue link -> Fetch issue + screenshot (GitHub API or manual upload)
 - **Open a pull request with the fix:** one click creates a branch, applies the checked one-line patch, and opens a PR that says "Fixes #n". The line is re-read from the repo first and must still match. TraceLens only opens the PR, never merges it. This needs a token with Contents: Read and write and Pull requests: Read and write.
 - **Paste or drop a screenshot:** press Ctrl+V anywhere on the page, or drag an image onto the upload box, to use it instead of the issue's image.
 - **Result cache:** re-triaging the same issue reuses Gemma's earlier answer (same prompt, same image), so a repeat takes seconds. The cache clears when the server restarts.
+- **Rate-limit retry:** if the Gemini API answers "rate limit", TraceLens waits 10 seconds and tries once more before showing an error.
 - **Comment preview:** switch the draft between editing it and seeing it as GitHub will show it (sanitized).
 
 ### Trust and grounding
@@ -47,20 +48,23 @@ Issue link -> Fetch issue + screenshot (GitHub API or manual upload)
 
 ## Setup
 
-Requires Node 18 or newer.
+Requires Node 18 or newer. From the project root:
 
 ```bash
-cd server
-npm install
-cp .env.example .env    # then fill in the values below
-npm start               # http://localhost:8787
-
-cd ../client
-npm install
-npm run dev             # http://localhost:5173 (proxies /api to the server)
+npm run setup                          # installs server and client
+cp server/.env.example server/.env     # then fill in the values below
+npm run demo                           # builds the UI and serves everything at http://localhost:8787
 ```
 
-Or build the client once (`npm run build` in `client/`) and the server serves it at http://localhost:8787.
+| Command | What it does |
+|---|---|
+| `npm run setup` | Install server and client dependencies |
+| `npm run demo` | Build the UI, then start the server at http://localhost:8787 |
+| `npm start` | Start the server (serves the last built UI) |
+| `npm run dev:server` + `npm run dev:client` | Development mode with reload; UI at http://localhost:5173 |
+| `npm test` | Unit tests for grounding, patch checks, parsing and comments |
+
+GitHub Actions runs the tests and the UI build on every push and pull request (`.github/workflows/ci.yml`).
 
 `server/.env`:
 

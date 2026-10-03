@@ -40,7 +40,7 @@ async function askUncached({ prompt, images, system }) {
   }
 }
 
-async function generate({ prompt, images, system }) {
+async function generate({ prompt, images, system }, rateLimitRetry = true) {
   const parts = [
     ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } })),
     // Gemma on the Gemini API has no system role, so the system text leads the prompt.
@@ -57,7 +57,12 @@ async function generate({ prompt, images, system }) {
   } catch (err) {
     if (jsonModeSupported && err.status === 400 && /json|mime/i.test(err.message)) {
       jsonModeSupported = false;
-      return generate({ prompt, images, system });
+      return generate({ prompt, images, system }, rateLimitRetry);
+    }
+    // Free-tier rate limits are per minute: wait once, then retry before giving up.
+    if (rateLimitRetry && err.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+      return generate({ prompt, images, system }, false);
     }
     throw explain(err);
   }
