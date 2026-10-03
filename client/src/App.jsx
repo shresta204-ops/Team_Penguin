@@ -14,6 +14,7 @@ export default function App() {
   const [view, setView] = useState('home');
   const [model, setModel] = useState('');
   const [auth, setAuth] = useState(null); // { signedIn, login, avatarUrl, oauthConfigured }
+  const [showSignIn, setShowSignIn] = useState(false);
   const [issueUrl, setIssueUrl] = useState('');
   const [upload, setUpload] = useState(null); // { name, mimeType, data }
   const [stage, setStage] = useState(null);
@@ -94,13 +95,14 @@ export default function App() {
 
   return (
     <div className="shell">
+      {showSignIn && <SignInDialog auth={auth} onClose={() => setShowSignIn(false)} />}
       <Sidebar view={view} setView={setView} historyCount={history.length} />
 
       <div className="content">
         <header className="topbar">
           <span className="topbar-item"><GithubMark /> {repoName}</span>
           <span className="topbar-item secondary">Model <code>{model || '...'}</code></span>
-          <Account auth={auth} setAuth={setAuth} />
+          <Account auth={auth} setAuth={setAuth} onSignIn={() => setShowSignIn(true)} />
         </header>
 
         <div className="columns">
@@ -143,7 +145,7 @@ export default function App() {
           </main>
 
           <aside className="rail">
-            <AiCard model={model} />
+            <AccountCard auth={auth} setAuth={setAuth} health={health} onSignIn={() => setShowSignIn(true)} />
             {result && view === 'home' && (
               <>
                 <CommentCard comment={comment} setComment={setComment} mode={result.mode} />
@@ -158,27 +160,100 @@ export default function App() {
   );
 }
 
-// Signed-in GitHub user, or a sign-in button when OAuth is set up on the server.
-function Account({ auth, setAuth }) {
+async function signOut(auth, setAuth) {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  setAuth({ ...auth, signedIn: false, login: null, avatarUrl: null });
+}
+
+function Avatar({ auth, size = 30 }) {
+  return auth.avatarUrl
+    ? <img className="avatar avatar-img" style={{ width: size, height: size }} src={auth.avatarUrl} alt="" />
+    : <span className="avatar" style={{ width: size, height: size }}>{auth.login.slice(0, 2).toUpperCase()}</span>;
+}
+
+// Top bar: the signed-in GitHub user, or a "Sign in with GitHub" button.
+function Account({ auth, setAuth, onSignIn }) {
   if (auth?.signedIn) {
-    async function signOut() {
-      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-      setAuth({ ...auth, signedIn: false, login: null, avatarUrl: null });
-    }
     return (
       <span className="topbar-item">
-        {auth.avatarUrl ? <img className="avatar avatar-img" src={auth.avatarUrl} alt="" /> : <span className="avatar">{auth.login.slice(0, 2).toUpperCase()}</span>}
-        {auth.login}
-        <button type="button" className="link" onClick={signOut}>Sign out</button>
+        <Avatar auth={auth} />
+        <strong>{auth.login}</strong>
+        <button type="button" className="link" onClick={() => signOut(auth, setAuth)}>Sign out</button>
       </span>
     );
   }
-  if (auth?.oauthConfigured) {
+  return (
+    <button type="button" className="signin" onClick={() => (auth?.oauthConfigured ? (location.href = '/api/auth/login') : onSignIn())}>
+      <GithubMark /> Sign in with GitHub
+    </button>
+  );
+}
+
+// Right rail: who TraceLens acts as on GitHub.
+function AccountCard({ auth, setAuth, health, onSignIn }) {
+  if (auth?.signedIn) {
     return (
-      <a className="signin" href="/api/auth/login"><GithubMark /> Sign in with GitHub</a>
+      <section className="card account-card">
+        <div className="account-head">
+          <Avatar auth={auth} size={44} />
+          <div>
+            <div className="account-name">{auth.login}</div>
+            <div className="secondary small">Signed in with GitHub</div>
+          </div>
+        </div>
+        <p className="small account-note">Triage reads and comments are made as <strong>@{auth.login}</strong>.</p>
+        <button type="button" className="outline full" onClick={() => signOut(auth, setAuth)}>Sign out</button>
+      </section>
     );
   }
-  return <span className="topbar-item"><span className="avatar">TP</span> {TEAM}</span>;
+  return (
+    <section className="card account-card">
+      <div className="account-head">
+        <span className="account-mark"><GithubMark size={24} /></span>
+        <div>
+          <div className="account-name">Connect GitHub</div>
+          <div className="secondary small">Post triage comments as yourself</div>
+        </div>
+      </div>
+      <button type="button" className="signin full" onClick={() => (auth?.oauthConfigured ? (location.href = '/api/auth/login') : onSignIn())}>
+        <GithubMark /> Sign in with GitHub
+      </button>
+      <p className="secondary small account-note">
+        {health?.setup?.githubToken
+          ? 'Not signed in: TraceLens uses the server token for now.'
+          : 'Not signed in and no server token: sign in to triage issues.'}
+      </p>
+    </section>
+  );
+}
+
+// Shown when sign-in is clicked but the server has no OAuth App keys yet.
+function SignInDialog({ auth, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Set up Sign in with GitHub" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        <span className="account-mark big"><GithubMark size={30} /></span>
+        <h2>Set up Sign in with GitHub</h2>
+        <p className="secondary">GitHub sign-in needs a free OAuth App. It takes about two minutes:</p>
+        <ol className="steps">
+          <li>Open <a href="https://github.com/settings/applications/new" target="_blank" rel="noreferrer">github.com/settings/applications/new</a>.</li>
+          <li>Homepage URL: <code>http://localhost:8787</code></li>
+          <li>Callback URL: <code>http://localhost:8787/api/auth/callback</code></li>
+          <li>Click <strong>Register application</strong>, then <strong>Generate a new client secret</strong>.</li>
+          <li>Add to <code>server/.env</code>:<pre>{'GITHUB_CLIENT_ID=...\nGITHUB_CLIENT_SECRET=...\nAPP_URL=http://localhost:8787'}</pre></li>
+          <li>Restart the server and click <strong>Sign in with GitHub</strong> again.</li>
+        </ol>
+        {!auth?.oauthConfigured && <p className="secondary small">Until then, TraceLens uses <code>GITHUB_TOKEN</code> from server/.env.</p>}
+        <button type="button" className="primary full" onClick={onClose}>Got it</button>
+      </div>
+    </div>
+  );
 }
 
 function Sidebar({ view, setView, historyCount }) {
@@ -643,31 +718,6 @@ function CodeView({ match, focusLines, strength }) {
   );
 }
 
-function AiCard({ model }) {
-  const points = [
-    'Understands screenshots and visual context',
-    'Finds the code that renders the broken text',
-    'Cites only real lines from your repository',
-    'Suggests a fix, labels and difficulty',
-    'Asks the reporter instead of guessing',
-    'Posts nothing without your approval',
-  ];
-  return (
-    <section className="card ai-card">
-      <div className="ai-head">
-        <Spark size={30} />
-        <div>
-          <h2>AI-powered triage</h2>
-          <div className="secondary small">Built with Gemma 4 via the Gemini API</div>
-        </div>
-      </div>
-      <ul className="checks">
-        {points.map((p) => <li key={p}><span className="check-dot"><Icon name="check" size={12} /></span>{p}</li>)}
-      </ul>
-      <div className="model-pill"><Spark size={18} /> <code>{model || 'Gemma 4'}</code></div>
-    </section>
-  );
-}
 
 function CommentCard({ comment, setComment, mode }) {
   const ref = useRef(null);
