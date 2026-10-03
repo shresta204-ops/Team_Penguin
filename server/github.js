@@ -1,6 +1,7 @@
 // GitHub REST helpers. Only the server talks to GitHub.
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { httpError } from './gemma.js';
+import { isAllowedImageUrl, isImageType, MAX_IMAGE_BYTES } from './security.js';
 
 const API = 'https://api.github.com';
 
@@ -20,7 +21,9 @@ export function withToken(userToken, fn) {
 }
 
 function token() {
-  const t = requestToken.getStore() || process.env.GITHUB_TOKEN;
+  // With REQUIRE_SIGN_IN=true the server's own token is never used for a visitor.
+  const fallback = process.env.REQUIRE_SIGN_IN === 'true' ? null : process.env.GITHUB_TOKEN;
+  const t = requestToken.getStore() || fallback;
   if (!t) {
     throw httpError(500, 'Missing GitHub token. Sign in with GitHub, or add GITHUB_TOKEN to server/.env and restart the server.');
   }
@@ -95,20 +98,29 @@ export function findImageUrl(body) {
   return found[0]?.url || null;
 }
 
-// Downloads a screenshot as base64. GitHub user-attachments need the token and redirect to a signed URL.
-// Returns null on failure so the caller can offer manual upload.
+// Downloads a screenshot as base64, or returns null so the caller can offer manual upload.
+// SSRF guard: every hop (redirects included) must be an HTTPS GitHub/imgur image host, the token is
+// only ever sent to github.com itself, and images over 10 MB are refused.
 export async function downloadImage(url) {
-  const tryFetch = async (headers) => {
-    const res = await fetch(url, { headers: { 'User-Agent': 'TraceLens', ...headers }, redirect: 'follow' });
-    if (!res.ok) return null;
-    const type = (res.headers.get('content-type') || '').split(';')[0];
-    if (!type.startsWith('image/')) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return { mimeType: type, data: buf.toString('base64') };
-  };
   try {
-    const isGithub = /(^|\.)github(usercontent)?\.com$/.test(new URL(url).hostname);
-    return (isGithub && (await tryFetch({ Authorization: `Bearer ${token()}` }))) || (await tryFetch({}));
+    let current = url;
+    for (let hop = 0; hop < 4; hop++) {
+      if (!isAllowedImageUrl(current)) return null;
+      const host = new URL(current).hostname;
+      const headers = { 'User-Agent': 'TraceLens', ...(host === 'github.com' && { Authorization: `Bearer ${token()}` }) };
+      const res = await fetch(current, { headers, redirect: 'manual' });
+      if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        current = new URL(res.headers.get('location'), current).href;
+        continue;
+      }
+      if (!res.ok) return null;
+      const type = (res.headers.get('content-type') || '').split(';')[0].trim();
+      if (!isImageType(type) || Number(res.headers.get('content-length')) > MAX_IMAGE_BYTES) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_IMAGE_BYTES) return null;
+      return { mimeType: type, data: buf.toString('base64') };
+    }
+    return null;
   } catch {
     return null;
   }

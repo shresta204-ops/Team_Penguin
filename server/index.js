@@ -9,15 +9,25 @@ import { MODEL, httpError } from './gemma.js';
 import { triage } from './pipeline.js';
 import { parseIssueUrl, postComment, addLabels, listIssues, parseRepo, openFixPullRequest } from './github.js';
 import { authRouter, sessionToken } from './auth.js';
+import { securityHeaders, rateLimit, sameOriginOnly, requireSignIn } from './security.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SAVED_DIR = path.join(here, '..', 'saved');
 const CLIENT_DIST = path.join(here, '..', 'client', 'dist');
 
 const app = express();
-app.use(express.json({ limit: '20mb' }));
+app.disable('x-powered-by');
+if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1); // behind Render/Railway/Fly: real client IPs
+app.use(securityHeaders);
+app.use(express.json({ limit: '15mb' })); // a 10 MB screenshot as base64
+app.use('/api', sameOriginOnly);
+app.use('/api', rateLimit({ max: 120 })); // general ceiling per IP per minute
 app.use('/api', sessionToken); // GitHub calls use the signed-in user's token when there is one
-app.use('/api/auth', authRouter);
+app.use('/api/auth', rateLimit({ max: 20 }), authRouter);
+
+// Expensive or GitHub-writing routes get tighter limits (per IP per minute).
+const gemmaLimit = rateLimit({ max: 8 });
+const writeLimit = rateLimit({ max: 10 });
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -28,12 +38,13 @@ app.get('/api/health', (req, res) => {
       gemini: Boolean(process.env.GEMINI_API_KEY),
       githubToken: Boolean(process.env.GITHUB_TOKEN),
       oauth: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
+      requireSignIn: process.env.REQUIRE_SIGN_IN === 'true',
     },
   });
 });
 
 // Issue inbox: open issues in a repo, screenshot issues first. Query: ?repo=owner/repo
-app.get('/api/issues', async (req, res) => {
+app.get('/api/issues', requireSignIn, async (req, res) => {
   try {
     const ref = parseRepo(req.query.repo);
     const issues = await listIssues(ref);
@@ -46,7 +57,7 @@ app.get('/api/issues', async (req, res) => {
 
 // Body: { issueUrl } | { issueUrl, imageBase64, mimeType } | { issueUrl, saved: true } | { saved: "name" }
 // With "Accept: application/x-ndjson" the route streams {stage} lines, then {result} or {error}.
-app.post('/api/triage', async (req, res) => {
+app.post('/api/triage', gemmaLimit, requireSignIn, async (req, res) => {
   const stream = (req.get('accept') || '').includes('application/x-ndjson');
   const send = (obj) => res.write(JSON.stringify(obj) + '\n');
   if (stream) res.type('application/x-ndjson');
@@ -67,7 +78,7 @@ app.post('/api/triage', async (req, res) => {
 // Body: { issueUrl, comment, labels }
 // Body: { issueUrl, patch: { file, line, before, after } } -> { url, number, branch }
 // Needs a token with Contents: write and Pull requests: write. Only opens a PR; never merges.
-app.post('/api/fix-pr', async (req, res) => {
+app.post('/api/fix-pr', writeLimit, requireSignIn, async (req, res) => {
   try {
     const { issueUrl, patch } = req.body || {};
     const ref = parseIssueUrl(issueUrl);
@@ -83,16 +94,18 @@ app.post('/api/fix-pr', async (req, res) => {
   }
 });
 
-app.post('/api/post', async (req, res) => {
+app.post('/api/post', writeLimit, requireSignIn, async (req, res) => {
   try {
     const { issueUrl, comment, labels } = req.body || {};
     const ref = parseIssueUrl(issueUrl);
     if (!comment || !String(comment).trim()) throw httpError(400, 'The comment is empty. Write or restore the draft before posting.');
+    if (String(comment).length > 65_000) throw httpError(413, 'The comment is longer than GitHub allows (65,000 characters). Shorten it.');
+    const cleanLabels = (Array.isArray(labels) ? labels : []).map(String).filter((l) => l.trim() && l.length <= 50).slice(0, 10);
     const commentUrl = await postComment(ref, String(comment));
     let applied = [];
     let labelError = null;
     try {
-      applied = await addLabels(ref, Array.isArray(labels) ? labels : []);
+      applied = await addLabels(ref, cleanLabels);
     } catch (err) {
       labelError = `Comment posted, but labels were not applied: ${err.message}`;
     }

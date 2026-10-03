@@ -2,8 +2,10 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { withToken } from './github.js';
+import { isHttps } from './security.js';
 
-const sessions = new Map(); // session id -> { token, login, avatarUrl }
+const sessions = new Map(); // session id -> { token, login, avatarUrl, expiresAt }
+const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 const appUrl = () => (process.env.APP_URL || 'http://localhost:8787').replace(/\/$/, '');
 const configured = () => Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
 
@@ -17,16 +19,28 @@ function cookies(req) {
 }
 
 function setCookie(res, name, value, maxAgeSec) {
-  res.append('Set-Cookie', `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`);
+  const secure = isHttps() ? '; Secure' : '';
+  res.append('Set-Cookie', `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`);
 }
 
 function session(req) {
-  return sessions.get(cookies(req).tl_session) || null;
+  const id = cookies(req).tl_session;
+  const s = sessions.get(id);
+  if (s && s.expiresAt <= Date.now()) { sessions.delete(id); return null; }
+  return s || null;
+}
+
+// Optional allowlist: ALLOWED_GITHUB_USERS=alice,bob (empty = anyone may sign in).
+function userAllowed(login) {
+  const list = String(process.env.ALLOWED_GITHUB_USERS || '').split(',').map((u) => u.trim().toLowerCase()).filter(Boolean);
+  return !list.length || list.includes(String(login).toLowerCase());
 }
 
 // Runs every /api request with the signed-in user's token (falls back to GITHUB_TOKEN).
 export function sessionToken(req, res, next) {
-  withToken(session(req)?.token, next);
+  const s = session(req);
+  req.githubUser = s?.login || null;
+  withToken(s?.token, next);
 }
 
 export const authRouter = Router();
@@ -70,8 +84,11 @@ authRouter.get('/callback', async (req, res) => {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'TraceLens' },
     })).json();
 
+    if (!userAllowed(user.login)) {
+      return res.status(403).send(`Sign-in refused: @${user.login} is not on this server's ALLOWED_GITHUB_USERS list.`);
+    }
     const id = crypto.randomBytes(24).toString('hex');
-    sessions.set(id, { token, login: user.login, avatarUrl: user.avatar_url });
+    sessions.set(id, { token, login: user.login, avatarUrl: user.avatar_url, expiresAt: Date.now() + SESSION_MS });
     setCookie(res, 'tl_session', id, 60 * 60 * 24 * 7);
     res.redirect(`${appUrl()}/`);
   } catch (err) {

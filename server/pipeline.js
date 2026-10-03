@@ -4,6 +4,7 @@ import { SYSTEM, lookPrompt, diagnosePrompt } from './prompts.js';
 import { parseIssueUrl, getIssue, findImageUrl, downloadImage, searchIssues } from './github.js';
 import { searchRepo, numberLines } from './search.js';
 import { diagnosisComment, askReporterComment } from './comment.js';
+import { checkUpload } from './security.js';
 
 const MAX_PROMPT_CHARS = 90_000;
 
@@ -12,6 +13,7 @@ export async function triage({ issueUrl, imageBase64, mimeType, pathPrefix }, on
   const started = Date.now();
   const ref = parseIssueUrl(issueUrl);
 
+  if (imageBase64) checkUpload(stripDataUrl(imageBase64), mimeType || 'image/png');
   onStage('fetching');
   const issue = await getIssue(ref);
   const image = imageBase64 ? { mimeType: mimeType || 'image/png', data: stripDataUrl(imageBase64) } : await issueScreenshot(issue);

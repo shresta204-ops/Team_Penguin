@@ -93,6 +93,19 @@ Instead of one shared `GITHUB_TOKEN`, each maintainer can sign in, and TraceLens
 
 The token requests the `public_repo` scope. Sessions are kept in server memory, so restarting the server signs everyone out. When nobody is signed in, `GITHUB_TOKEN` is used.
 
+## Deploy (Render, free)
+
+The repo includes a Render blueprint (`render.yaml`). A deployed copy runs in safe mode: visitors sign in with GitHub and act as themselves, and no shared token is stored.
+
+1. **Create a second GitHub OAuth App for production** at github.com/settings/applications/new. Set the Homepage URL to `https://<your-app>.onrender.com` and the callback URL to `https://<your-app>.onrender.com/api/auth/callback`.
+2. On [render.com](https://render.com), go to **New**, then **Blueprint**, and connect `shresta204-ops/Team_Penguin`. Render reads `render.yaml`.
+3. Fill in the secret values when prompted: `GEMINI_API_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `APP_URL` (`https://<your-app>.onrender.com`), and optionally `ALLOWED_GITHUB_USERS` (for example your team's GitHub logins).
+4. Deploy. Health check: `https://<your-app>.onrender.com/api/health`.
+
+Free-tier notes: the service sleeps after 15 minutes idle, so the first request takes about a minute. Sessions and the cache reset on each restart. For the live demo, run TraceLens locally and share the deployed link for judges to try.
+
+Security details are in [SECURITY.md](SECURITY.md).
+
 ## API
 
 | Route | Body | Returns |

@@ -1,0 +1,27 @@
+# One-click deploy on Render (https://render.com): New > Blueprint > pick this repo.
+# Secrets marked sync: false are typed into the Render dashboard, never committed.
+services:
+  - type: web
+    name: tracelens
+    runtime: node
+    plan: free
+    buildCommand: npm run setup && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: APP_URL # e.g. https://tracelens.onrender.com (no trailing slash)
+        sync: false
+      - key: ALLOWED_GITHUB_USERS # optional: comma-separated GitHub logins allowed to sign in
+        sync: false
+      - key: GEMMA_MODEL
+        value: gemma-4-26b-a4b-it
+      - key: REQUIRE_SIGN_IN # visitors act as themselves; the server never uses a shared token
+        value: "true"
+      - key: TRUST_PROXY # Render sits behind a proxy; needed for per-IP rate limits
+        value: "true"
