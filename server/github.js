@@ -152,20 +152,30 @@ export async function openFixPullRequest({ owner, repo, number }, { file, line, 
   const branch = `tracelens/fix-issue-${number}-${Date.now().toString(36)}`;
   const head = await gh(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
   await gh(`/repos/${owner}/${repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: head.object.sha } });
-  await gh(`/repos/${owner}/${repo}/contents/${encoded}`, {
-    method: 'PUT',
-    body: { message: `Fix #${number}: ${file}:${line}`, content: Buffer.from(lines.join(eol)).toString('base64'), sha: current.sha, branch },
-  });
-  const pr = await gh(`/repos/${owner}/${repo}/pulls`, {
-    method: 'POST',
-    body: {
-      title: `Fix #${number}: update ${file.split('/').pop()} line ${line}`,
-      head: branch,
-      base,
-      body: `Fixes #${number}.\n\n\`\`\`diff\n- ${before.trim()}\n+ ${after.trim()}\n\`\`\`\n\nOne-line fix suggested by TraceLens (Gemma 4). The removed line was verified against the file. Please review before merging.`,
-    },
-  });
-  return { url: pr.html_url, number: pr.number, branch };
+  try {
+    return await commitAndOpenPr();
+  } catch (err) {
+    // A token that can push but not open PRs would otherwise leave a stray branch behind.
+    await gh(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { method: 'DELETE' }).catch(() => {});
+    throw err;
+  }
+
+  async function commitAndOpenPr() {
+    await gh(`/repos/${owner}/${repo}/contents/${encoded}`, {
+      method: 'PUT',
+      body: { message: `Fix #${number}: ${file}:${line}`, content: Buffer.from(lines.join(eol)).toString('base64'), sha: current.sha, branch },
+    });
+    const pr = await gh(`/repos/${owner}/${repo}/pulls`, {
+      method: 'POST',
+      body: {
+        title: `Fix #${number}: update ${file.split('/').pop()} line ${line}`,
+        head: branch,
+        base,
+        body: `Fixes #${number}.\n\n\`\`\`diff\n- ${before.trim()}\n+ ${after.trim()}\n\`\`\`\n\nOne-line fix suggested by TraceLens (Gemma 4). The removed line was verified against the file. Please review before merging.`,
+      },
+    });
+    return { url: pr.html_url, number: pr.number, branch };
+  }
 }
 
 export async function postComment({ owner, repo, number }, body) {
