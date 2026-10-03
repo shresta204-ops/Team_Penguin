@@ -2,25 +2,29 @@
 
 ## Before the demo
 
-1. Push `demo-repo/` as its own public GitHub repo (for example `penguin-dashboard`).
-2. Create a fine-grained token for that repo only (Issues read/write, Contents read) and put it in `server/.env` with the Gemini key.
-3. Open the two issues below by hand, dragging in the screenshots from `demo-assets/`.
-4. Run a live triage of both issues once. This writes `saved/<owner>-<repo>-<n>.json`, the backup if the API is rate-limited on stage.
-5. Have these tabs open: issue 1 on GitHub, TraceLens, `server/gemma.js` in the editor.
+The demo runs against this repo: **https://github.com/shresta204-ops/Team_Penguin**. The buggy dashboard lives in `demo-repo/`, and the two demo issues are already open:
+
+- Issue 1: https://github.com/shresta204-ops/Team_Penguin/issues/1
+- Issue 2: https://github.com/shresta204-ops/Team_Penguin/issues/2
+
+1. Put `GEMINI_API_KEY` and `GITHUB_TOKEN` in `server/.env`. The token is a fine-grained token for Team_Penguin only, with Issues read/write and Contents read.
+2. Start the app: run `npm start` in `server/` (it serves the built client at http://localhost:8787).
+3. Triage both issues live once. This writes `saved/shresta204-ops-Team_Penguin-<n>.json`, your backup if the API is rate-limited on stage.
+4. Have these tabs open: issue 1 on GitHub, TraceLens, and `server/gemma.js` in the editor.
 
 ### Issue 1: planted bug
 
 - Title: `Profile page broken`
-- Body: `after login my name is gone??`, plus `demo-assets/issue-1-welcome-undefined.png`
+- Body: `after login my name is gone??` plus the screenshot of "Welcome back, undefined!"
 
-Expected: diagnosis mode, `src/components/Dashboard.jsx` matched with "Welcome back" highlighted, evidence near line 17, fix says `user.fullname` should be `user.name`, `good first issue` suggested.
+Expected: diagnosis mode. `demo-repo/src/components/Dashboard.jsx` is matched with "Welcome back" highlighted, the evidence cites line 17, the fix says `user.fullname` should be `user.name`, and `good first issue` is suggested.
 
 ### Issue 2: not enough information
 
 - Title: `dashboard looks weird`
-- Body: `something is off on this page, pls fix`, plus `demo-assets/issue-2-looks-normal.png` (a normal-looking dashboard)
+- Body: `something is off on this page, pls fix` plus a normal-looking dashboard screenshot
 
-Expected: ask-reporter mode, and the draft asks for the page, steps to reproduce and the expected result.
+Expected: ask-reporter mode. The draft asks what looks wrong, steps to reproduce and the expected result.
 
 ## Run of show (2 minutes)
 
@@ -30,7 +34,7 @@ Expected: ask-reporter mode, and the draft asks for the page, steps to reproduce
 | 0:20 to 0:50 | "TraceLens sends the screenshot to Gemma 4." | Paste link, click Triage issue, point at what Gemma sees |
 | 0:50 to 1:15 | "Gemma read 'Welcome back' off the screen, and we found that exact line in the repo." | Highlighted code match, then diagnosis |
 | 1:15 to 1:35 | "Every line it cites is real code. Anything else is thrown out." | Post to GitHub, open the live comment |
-| 1:35 to 1:50 | "When a screenshot isn't enough, it asks instead of guessing." | Saved result for issue 2 (`?saved=<owner>-<repo>-<n>`) |
+| 1:35 to 1:50 | "When a screenshot isn't enough, it asks instead of guessing." | Issue 2 live, or the saved result (`?saved=shresta204-ops-Team_Penguin-2`) |
 | 1:50 to 2:00 | "Two Gemma 4 calls through the Gemini API, all in one file. MIT licensed." | `server/gemma.js` |
 
 If the live call fails on stage: click **Load saved result for this issue** under the error and carry on.
