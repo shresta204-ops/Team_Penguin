@@ -297,8 +297,29 @@ function Sidebar({ view, setView, historyCount }) {
 }
 
 function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, setError, highlightUpload, pathPrefix, setPathPrefix }) {
+  const [dragging, setDragging] = useState(false);
+
+  // Ctrl+V anywhere on the page pastes a screenshot from the clipboard.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+      if (item) { e.preventDefault(); readImage(item.getAsFile(), 'pasted screenshot'); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
+  function onDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    readImage(e.dataTransfer.files?.[0]);
+  }
+
   async function onFile(e) {
-    const file = e.target.files?.[0];
+    readImage(e.target.files?.[0]);
+  }
+
+  async function readImage(file, name) {
     if (!file) return setUpload(null);
     if (!file.type.startsWith('image/')) return setError({ message: 'That file is not an image. Choose a PNG or JPEG screenshot.' });
     const dataUrl = await new Promise((resolve) => {
@@ -306,7 +327,7 @@ function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, 
       reader.onload = () => resolve(reader.result);
       reader.readAsDataURL(file);
     });
-    setUpload({ name: file.name, mimeType: file.type, data: String(dataUrl).split(',')[1] });
+    setUpload({ name: name || file.name, mimeType: file.type, data: String(dataUrl).split(',')[1] });
   }
 
   return (
@@ -326,9 +347,10 @@ function TriageForm({ issueUrl, setIssueUrl, busy, onSubmit, upload, setUpload, 
       </form>
       <div className={highlightUpload ? 'upload-row attention' : 'upload-row'}>
         <span className="field-label">Or upload a screenshot</span>
-        <label className="upload-box">
+        <label className={dragging ? 'upload-box dragging' : 'upload-box'}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
           <Icon name="upload" />
-          <span>{upload ? upload.name : 'Choose an image (used instead of the issue image)'}</span>
+          <span>{upload ? upload.name : 'Drop, paste (Ctrl+V) or choose an image, used instead of the issue image'}</span>
           <input type="file" accept="image/*" onChange={onFile} disabled={busy} />
         </label>
         {upload && <button type="button" className="link" onClick={() => setUpload(null)}>Remove</button>}
@@ -652,6 +674,7 @@ function EvidenceAndDiagnosis({ result, activeFile, setActiveFile }) {
                 <div className="diff-note secondary small">The removed line is checked against the real file.</div>
               </div>
             )}
+            {diagnosis.patch && <FixPullRequest issueUrl={result.issue.url} patch={diagnosis.patch} />}
           </div>
           <div className="dx-pair">
             <div><div className="field-label">Difficulty</div><span className={`chip ${levelColor(diagnosis.difficulty, true)}`}>{cap(diagnosis.difficulty)}</span></div>
@@ -660,6 +683,39 @@ function EvidenceAndDiagnosis({ result, activeFile, setActiveFile }) {
           {diagnosis.confidence === 'low' && <p className="secondary small">Low confidence: check the code yourself before acting on this.</p>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Opens a PR that applies the verified one-line patch. Never merges.
+function FixPullRequest({ issueUrl, patch }) {
+  const [state, setState] = useState({ kind: 'idle' }); // idle | working | done | error
+  async function open() {
+    setState({ kind: 'working' });
+    try {
+      const res = await fetch('/api/fix-pr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issueUrl, patch }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setState({ kind: 'done', url: data.url, number: data.number });
+    } catch (err) {
+      setState({ kind: 'error', text: err.message || 'Could not open the pull request.' });
+    }
+  }
+  if (state.kind === 'done') {
+    return (
+      <p className="pr-done"><Icon name="check" size={15} /> Pull request <a href={state.url} target="_blank" rel="noreferrer">#{state.number}</a> opened with this fix.</p>
+    );
+  }
+  return (
+    <div className="pr-row">
+      <button type="button" className="outline" onClick={open} disabled={state.kind === 'working'}>
+        <GithubMark size={15} /> {state.kind === 'working' ? 'Opening pull request...' : 'Open pull request with this fix'}
+      </button>
+      {state.kind === 'error' && <p className="error-text small">{state.text}</p>}
     </div>
   );
 }

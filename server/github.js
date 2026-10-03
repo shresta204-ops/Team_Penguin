@@ -134,6 +134,40 @@ export async function searchIssues({ owner, repo }, terms) {
   return res.items.map((i) => ({ number: i.number, title: i.title, url: i.html_url, state: i.state }));
 }
 
+// Opens a pull request that replaces one line. The line is re-read from the repo and must still
+// equal `before` exactly, so only the grounded patch can be applied.
+export async function openFixPullRequest({ owner, repo, number }, { file, line, before, after }) {
+  const meta = await gh(`/repos/${owner}/${repo}`);
+  const base = meta.default_branch;
+  const encoded = file.split('/').map(encodeURIComponent).join('/');
+  const current = await gh(`/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(base)}`);
+  const text = Buffer.from(current.content, 'base64').toString('utf8');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(eol);
+  if (lines[line - 1] !== before) {
+    throw httpError(409, `${file}:${line} changed since the triage. Triage the issue again before opening a fix.`);
+  }
+  lines[line - 1] = after;
+
+  const branch = `tracelens/fix-issue-${number}-${Date.now().toString(36)}`;
+  const head = await gh(`/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
+  await gh(`/repos/${owner}/${repo}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: head.object.sha } });
+  await gh(`/repos/${owner}/${repo}/contents/${encoded}`, {
+    method: 'PUT',
+    body: { message: `Fix #${number}: ${file}:${line}`, content: Buffer.from(lines.join(eol)).toString('base64'), sha: current.sha, branch },
+  });
+  const pr = await gh(`/repos/${owner}/${repo}/pulls`, {
+    method: 'POST',
+    body: {
+      title: `Fix #${number}: update ${file.split('/').pop()} line ${line}`,
+      head: branch,
+      base,
+      body: `Fixes #${number}.\n\n\`\`\`diff\n- ${before.trim()}\n+ ${after.trim()}\n\`\`\`\n\nOne-line fix suggested by TraceLens (Gemma 4). The removed line was verified against the file. Please review before merging.`,
+    },
+  });
+  return { url: pr.html_url, number: pr.number, branch };
+}
+
 export async function postComment({ owner, repo, number }, body) {
   const res = await gh(`/repos/${owner}/${repo}/issues/${number}/comments`, { method: 'POST', body: { body } });
   return res.html_url;

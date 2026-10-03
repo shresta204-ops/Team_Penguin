@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MODEL, httpError } from './gemma.js';
 import { triage } from './pipeline.js';
-import { parseIssueUrl, postComment, addLabels, listIssues, parseRepo } from './github.js';
+import { parseIssueUrl, postComment, addLabels, listIssues, parseRepo, openFixPullRequest } from './github.js';
 import { authRouter, sessionToken } from './auth.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -65,6 +65,24 @@ app.post('/api/triage', async (req, res) => {
 });
 
 // Body: { issueUrl, comment, labels }
+// Body: { issueUrl, patch: { file, line, before, after } } -> { url, number, branch }
+// Needs a token with Contents: write and Pull requests: write. Only opens a PR; never merges.
+app.post('/api/fix-pr', async (req, res) => {
+  try {
+    const { issueUrl, patch } = req.body || {};
+    const ref = parseIssueUrl(issueUrl);
+    if (!patch?.file || !patch.line || typeof patch.before !== 'string' || typeof patch.after !== 'string') {
+      throw httpError(400, 'No verified fix to apply. Only a diagnosis with a suggested change can open a pull request.');
+    }
+    res.json(await openFixPullRequest(ref, patch));
+  } catch (err) {
+    if (err.status === 403 || err.status === 404) {
+      err.message = 'The GitHub token cannot create branches or pull requests here. Give it Contents: Read and write and Pull requests: Read and write, or sign in with GitHub.';
+    }
+    res.status(err.expose ? err.status : 500).json(errorBody(err));
+  }
+});
+
 app.post('/api/post', async (req, res) => {
   try {
     const { issueUrl, comment, labels } = req.body || {};

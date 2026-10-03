@@ -32,6 +32,9 @@ Issue link -> Fetch issue + screenshot (GitHub API or manual upload)
 - **Problem area on the screenshot:** Gemma returns a box around the broken part of the screen, and the UI draws it in red.
 - **Suggested change as a diff:** Gemma proposes a one-line patch. The patch is kept only if its "before" line exists word-for-word in a fetched file, and the red line shown is always the real file text.
 - **Similar issues:** TraceLens searches the repo's issues for the same on-screen text to flag possible duplicates. The search runs alongside the code search.
+- **Open a pull request with the fix:** one click creates a branch, applies the checked one-line patch, and opens a PR that says "Fixes #n". The line is re-read from the repo first and must still match. TraceLens only opens the PR, never merges it. This needs a token with Contents: Read and write and Pull requests: Read and write.
+- **Paste or drop a screenshot:** press Ctrl+V anywhere on the page, or drag an image onto the upload box, to use it instead of the issue's image.
+- **Result cache:** re-triaging the same issue reuses Gemma's earlier answer (same prompt, same image), so a repeat takes seconds. The cache clears when the server restarts.
 - **Comment preview:** switch the draft between editing it and seeing it as GitHub will show it (sanitized).
 
 ### Trust and grounding

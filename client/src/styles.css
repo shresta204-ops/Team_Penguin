@@ -413,3 +413,9 @@ button.signin { border: 1px solid #1f2328; cursor: pointer; }
 .setup { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .setup li { display: flex; gap: 14px; align-items: flex-start; }
 .setup .chip { min-width: 78px; justify-content: center; margin-top: 2px; }
+
+/* Fix pull request + drag-and-drop */
+.pr-row { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.pr-row p { margin: 0; }
+.pr-done { margin: 10px 0 0 !important; color: var(--green); font-weight: 600; display: flex; gap: 6px; align-items: center; font-size: 14px; }
+.upload-box.dragging { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }

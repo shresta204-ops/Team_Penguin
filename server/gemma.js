@@ -1,4 +1,5 @@
 // The whole Gemma 4 integration: image + text in, parsed JSON out.
+import { createHash } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 
 export const MODEL = process.env.GEMMA_MODEL || 'gemma-4-26b-a4b-it';
@@ -15,7 +16,18 @@ function getClient() {
 // Some Gemma ids reject JSON mode; we fall back to prompt + fence stripping.
 let jsonModeSupported = true;
 
+// Same prompt + same image = same answer: re-triaging an issue returns at once (kept until restart).
+const cache = new Map();
+
 export async function askGemma({ prompt, images = [], system }) {
+  const key = createHash('sha256').update(JSON.stringify([MODEL, system, prompt, images.map((i) => i.data)])).digest('hex');
+  if (cache.has(key)) return structuredClone(cache.get(key));
+  const answer = await askUncached({ prompt, images, system });
+  cache.set(key, answer);
+  return structuredClone(answer);
+}
+
+async function askUncached({ prompt, images, system }) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const text = await generate({ prompt, images, system });
     try {
